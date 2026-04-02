@@ -42,6 +42,17 @@ class TimeMixerAdapter(nn.Module):
                 backbone_state: optional pass-through state.
                 aux_info: auxiliary metadata.
         """
+        # TimeMixer's multi-scale path expects timestamp tensors to be indexable.
+        # Keep v0 robust by providing a minimal placeholder when timestamps are absent.
+        if inputs_timestamps is None:
+            batch_size, input_len, _ = inputs.shape
+            inputs_timestamps = torch.zeros(
+                batch_size,
+                input_len,
+                1,
+                dtype=inputs.dtype,
+                device=inputs.device,
+            )
 
         base_prediction = self.base_model(inputs, inputs_timestamps)
         backbone_state = None
