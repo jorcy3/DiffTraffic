@@ -3,7 +3,7 @@ from typing import Optional
 import torch
 from torch import nn
 
-from ..config import DiffTrafficV0Config
+from ..config.difftrafficv0_config import DiffTrafficV0Config
 from .condition_encoder_stack import ConditionEncoderStack
 from .condition_fusion import ConditionFusion
 from .residual_diffusion_decoder import ResidualDiffusionDecoder

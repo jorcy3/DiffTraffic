@@ -22,6 +22,8 @@ def difftraffic_loss(
     residual_prediction: Optional[torch.Tensor] = None,
     targets_mask: Optional[torch.Tensor] = None,
     aux_info: Optional[dict] = None,
+    scaler_mean: Optional[torch.Tensor] = None,
+    scaler_std: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Multi-term DiffTraffic loss with backward-compatible defaults.
@@ -40,12 +42,21 @@ def difftraffic_loss(
     w_diff = float(loss_weights.get("diff", 0.0))
     w_freq = float(loss_weights.get("freq", 0.0))
 
+    if scaler_mean is not None and scaler_std is not None:
+        scaler_mean = scaler_mean.to(prediction.device)
+        scaler_std = scaler_std.to(prediction.device)
+        prediction = prediction * scaler_std + scaler_mean
+        if base_prediction is not None:
+            base_prediction = base_prediction * scaler_std + scaler_mean
+        if residual_prediction is not None:
+            residual_prediction = residual_prediction * scaler_std
+
     loss_pred = _masked_l1(prediction, targets, targets_mask)
 
     loss_total = w_pred * loss_pred
 
     if residual_prediction is not None and base_prediction is not None and w_residual > 0.0:
-        target_residual = targets - base_prediction
+        target_residual = targets - base_prediction.detach()
         loss_residual = _masked_l1(residual_prediction, target_residual, targets_mask)
         loss_total = loss_total + w_residual * loss_residual
 

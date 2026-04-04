@@ -3,9 +3,7 @@ from typing import Optional
 import torch
 from torch import nn
 
-from ..config import DiffTrafficV0Config
-from .delta_condition_encoder import DeltaConditionEncoder
-from .frequency_condition_encoder import FrequencyConditionEncoder
+from .dynamic_condition_encoder import DynamicConditionEncoder
 from .graph_condition_encoder import GraphConditionEncoder
 from .residual_prior_encoder import ResidualPriorEncoder
 from .temporal_condition_encoder import TemporalConditionEncoder
@@ -16,20 +14,24 @@ class ConditionEncoderStack(nn.Module):
     Independent condition encoder stack.
     """
 
-    def __init__(self, config: DiffTrafficV0Config):
+    def __init__(self, config):
         super().__init__()
         self.config = config
         hidden_size = getattr(config, "condition_hidden_size", None) or config.residual_hidden_size
         graph_hidden_size = getattr(config, "graph_encoder_hidden_size", None) or hidden_size
 
         self.enable_graph_condition = bool(getattr(config, "enable_graph_condition", False))
-        self.enable_frequency_condition = bool(getattr(config, "enable_frequency_condition", False))
         self.enable_residual_prior = bool(getattr(config, "enable_residual_prior", True))
 
-        self.temporal_encoder = TemporalConditionEncoder(config.num_features, hidden_size)
-        self.delta_encoder = DeltaConditionEncoder(config.num_features, hidden_size)
+        self.temporal_encoder = TemporalConditionEncoder(
+            num_features=config.num_features,
+            hidden_size=hidden_size,
+            output_len=config.output_len,
+            steps_per_day=getattr(config, "steps_per_day", 288),
+            num_day_in_week=getattr(config, "num_day_in_week", 7),
+        )
+        self.dynamic_encoder = DynamicConditionEncoder(config.num_features, hidden_size)
         self.graph_encoder = GraphConditionEncoder(config.num_features, graph_hidden_size)
-        self.frequency_encoder = FrequencyConditionEncoder(config.num_features, hidden_size)
         self.residual_prior_encoder = ResidualPriorEncoder(config.num_features, hidden_size)
 
     def forward(
@@ -49,17 +51,12 @@ class ConditionEncoderStack(nn.Module):
         """
 
         temporal_condition = self.temporal_encoder(base_prediction, inputs_timestamps)
-        delta_condition = self.delta_encoder(inputs, base_prediction)
+        dynamic_condition = self.dynamic_encoder(inputs, base_prediction)
 
         if self.enable_graph_condition:
             graph_condition = self.graph_encoder(base_prediction, graph_prior)
         else:
             graph_condition = torch.zeros_like(base_prediction)
-
-        if self.enable_frequency_condition:
-            frequency_condition = self.frequency_encoder(base_prediction)
-        else:
-            frequency_condition = None
 
         if self.enable_residual_prior:
             residual_prior = self.residual_prior_encoder(base_prediction, inputs)
@@ -68,8 +65,7 @@ class ConditionEncoderStack(nn.Module):
 
         return {
             "temporal_condition": temporal_condition,
-            "delta_condition": delta_condition,
+            "dynamic_condition": dynamic_condition,
             "graph_condition": graph_condition,
-            "frequency_condition": frequency_condition,
             "residual_prior": residual_prior,
         }

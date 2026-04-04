@@ -23,4 +23,3 @@ class GraphConditionEncoder(GraphDelayEncoder):
         """
 
         return super().forward(base_prediction, graph_prior)
-

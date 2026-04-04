@@ -5,7 +5,7 @@ from torch import nn
 
 from basicts.models.TimeMixer import TimeMixerForForecasting
 
-from ..config import DiffTrafficV0Config
+from ..config.difftrafficv0_config import DiffTrafficV0Config
 
 
 class TimeMixerAdapter(nn.Module):

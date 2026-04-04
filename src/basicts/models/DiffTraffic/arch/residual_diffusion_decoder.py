@@ -3,7 +3,7 @@ from typing import Optional
 import torch
 from torch import nn
 
-from ..config import DiffTrafficV0Config
+from ..config.difftrafficv0_config import DiffTrafficV0Config
 from .denoise_block import DenoiseBlock
 from .diffusion_schedule import DiffusionSchedule
 from .residual_refinement_block import ResidualRefinementBlock
