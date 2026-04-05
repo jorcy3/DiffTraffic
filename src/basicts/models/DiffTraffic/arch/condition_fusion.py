@@ -49,6 +49,7 @@ class ConditionFusion(nn.Module):
 
         fused_backbone_state = backbone_state if self.use_backbone_state else None
         encoded_conditions = encoded_conditions or {}
+        horizon_condition = encoded_conditions.get("horizon_condition")
         temporal_condition = encoded_conditions.get("temporal_condition", torch.zeros_like(base_prediction))
         dynamic_condition = encoded_conditions.get("dynamic_condition", torch.zeros_like(base_prediction))
         graph_condition = encoded_conditions.get("graph_condition", torch.zeros_like(base_prediction))
@@ -56,7 +57,12 @@ class ConditionFusion(nn.Module):
         if residual_prior is not None:
             residual_prior = residual_prior.to(base_prediction.dtype)
 
-        condition_keys = ["temporal_condition", "dynamic_condition"]
+        if horizon_condition is None:
+            horizon_condition = temporal_condition
+        else:
+            horizon_condition = horizon_condition.to(base_prediction.dtype)
+
+        condition_keys = ["horizon_condition", "dynamic_condition"]
         if graph_condition is not None and torch.count_nonzero(graph_condition).item() > 0:
             condition_keys.append("graph_condition")
         if residual_prior is not None:
@@ -67,6 +73,7 @@ class ConditionFusion(nn.Module):
             "inputs": inputs,
             "backbone_state": fused_backbone_state,
             "inputs_timestamps": inputs_timestamps,
+            "horizon_condition": horizon_condition,
             "temporal_condition": temporal_condition.to(base_prediction.dtype),
             "dynamic_condition": dynamic_condition.to(base_prediction.dtype),
             "graph_condition": graph_condition.to(base_prediction.dtype),

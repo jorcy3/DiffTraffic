@@ -3,6 +3,8 @@ from .condition_fusion import ConditionFusion
 from .dynamic_condition_encoder import DynamicConditionEncoder
 from .delta_condition_encoder import DeltaConditionEncoder
 from .denoise_block import DenoiseBlock
+from .difftrafficv11_arch import DiffTrafficV11ForForecasting
+from .difftrafficv11_gate_arch import DiffTrafficV11GateForForecasting
 from .difftrafficv1_naive_arch import DiffTrafficV1NaiveForForecasting
 from .difftrafficv1_arch import DiffTrafficV1ForForecasting
 from .difftrafficv0_arch import DiffTrafficV0ForForecasting
@@ -10,11 +12,14 @@ from .frequency_condition_encoder import FrequencyConditionEncoder
 from .frequency_residual_encoder import FrequencyResidualEncoder
 from .graph_condition_encoder import GraphConditionEncoder
 from .graph_delay_encoder import GraphDelayEncoder
+from .horizon_condition_encoder import HorizonConditionEncoder
 from .naive_residual_head import NaiveResidualHead
 from .residual_refinement_block import ResidualRefinementBlock
 from .residual_diffusion_decoder import ResidualDiffusionDecoder
 from .residual_prior_encoder import ResidualPriorEncoder
 from .residual_refiner import ResidualRefiner
+from .selective_condition_encoder_stack import SelectiveConditionEncoderStack
+from .selective_residual_refiner import SelectiveResidualRefiner
 from .staeformer_adapter import STAEformerAdapter
 from .temporal_condition_encoder import TemporalConditionEncoder
 from .temporal_horizon_encoder import TemporalHorizonEncoder

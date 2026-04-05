@@ -8,18 +8,21 @@ from torch.utils.data import DataLoader
 from basicts.data import BasicTSForecastingDataset
 from basicts.utils.constants import BasicTSMode
 
+from .arch import DiffTrafficV11ForForecasting
+from .arch import DiffTrafficV11GateForForecasting
 from .arch import DiffTrafficV1NaiveForForecasting
 from .arch import DiffTrafficV1ForForecasting
+from .config import DiffTrafficV11Config
 from .config import DiffTrafficV1Config
 from .loss import difftraffic_loss
 
 
-def build_smoke_config() -> DiffTrafficV1Config:
+def build_smoke_config() -> DiffTrafficV11Config:
     """
-    Build a compact DiffTraffic-v1 config for import and shape checks.
+    Build a compact DiffTraffic-v1.1 config for import and shape checks.
     """
 
-    return DiffTrafficV1Config(
+    return DiffTrafficV11Config(
         input_len=16,
         output_len=8,
         num_features=3,
@@ -33,11 +36,12 @@ def build_smoke_config() -> DiffTrafficV1Config:
         residual_hidden_size=8,
         residual_dropout=0.0,
         condition_hidden_size=8,
-        enable_graph_condition=False,
+        residual_refiner_mode="selective",
+        loss_weight_gate=0.01,
     )
 
 
-def check_config_instantiation() -> DiffTrafficV1Config:
+def check_config_instantiation() -> DiffTrafficV11Config:
     """
     Instantiate the minimal config and return it for downstream checks.
     """
@@ -84,6 +88,7 @@ def check_loss_call(
     targets: torch.Tensor,
     base_prediction: torch.Tensor,
     residual_prediction: torch.Tensor,
+    residual_gate: torch.Tensor | None = None,
     aux_info: dict | None = None,
 ) -> torch.Tensor:
     """
@@ -95,6 +100,7 @@ def check_loss_call(
         targets=targets,
         base_prediction=base_prediction,
         residual_prediction=residual_prediction,
+        residual_gate=residual_gate,
         aux_info=aux_info,
     )
     if loss.ndim != 0:
@@ -104,11 +110,11 @@ def check_loss_call(
 
 def run_minimal_checks() -> Dict[str, object]:
     """
-    Run config, forward, shape, and loss smoke checks for DiffTraffic-v1.
+    Run config, forward, shape, and loss smoke checks for DiffTraffic-v1.1.
     """
 
     config = check_config_instantiation()
-    model = DiffTrafficV1ForForecasting(config)
+    model = DiffTrafficV11ForForecasting(config)
     inputs = torch.randn(2, config.input_len, config.num_features)
     inputs_timestamps = torch.zeros(2, config.input_len, 2)
     targets = torch.randn(2, config.output_len, config.num_features)
@@ -125,6 +131,7 @@ def run_minimal_checks() -> Dict[str, object]:
         targets=targets,
         base_prediction=outputs["base_prediction"],
         residual_prediction=outputs["residual_prediction"],
+        residual_gate=outputs.get("residual_gate"),
         aux_info=outputs.get("aux_info"),
     )
     return {
@@ -135,12 +142,12 @@ def run_minimal_checks() -> Dict[str, object]:
     }
 
 
-def build_metrla_real_step_config() -> DiffTrafficV1Config:
+def build_metrla_real_step_config() -> DiffTrafficV11Config:
     """
-    Build a small DiffTraffic-v1 config that matches the real METR-LA dataset.
+    Build a small DiffTraffic-v1.1 config that matches the real METR-LA dataset.
     """
 
-    return DiffTrafficV1Config(
+    return DiffTrafficV11Config(
         input_len=12,
         output_len=12,
         num_features=207,
@@ -154,15 +161,16 @@ def build_metrla_real_step_config() -> DiffTrafficV1Config:
         residual_hidden_size=64,
         residual_dropout=0.0,
         condition_hidden_size=64,
-        enable_graph_condition=False,
+        residual_refiner_mode="selective",
         loss_weight_pred=1.0,
         loss_weight_residual=0.5,
+        loss_weight_gate=0.01,
     )
 
 
 def run_real_metrla_train_step(batch_size: int = 2) -> Dict[str, object]:
     """
-    Run one real METR-LA training step with the current DiffTraffic-v1 shell.
+    Run one real METR-LA training step with the current DiffTraffic-v1.1 shell.
     """
 
     config = build_metrla_real_step_config()
@@ -179,7 +187,7 @@ def run_real_metrla_train_step(batch_size: int = 2) -> Dict[str, object]:
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     batch = next(iter(loader))
 
-    model = DiffTrafficV1ForForecasting(config)
+    model = DiffTrafficV11ForForecasting(config)
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     optimizer.zero_grad()
@@ -200,6 +208,7 @@ def run_real_metrla_train_step(batch_size: int = 2) -> Dict[str, object]:
         targets=targets,
         base_prediction=outputs["base_prediction"],
         residual_prediction=outputs["residual_prediction"],
+        residual_gate=outputs.get("residual_gate"),
         aux_info=outputs.get("aux_info"),
     )
     loss.backward()
@@ -216,6 +225,7 @@ def run_real_metrla_train_step(batch_size: int = 2) -> Dict[str, object]:
             "prediction": tuple(outputs["prediction"].shape),
             "base_prediction": tuple(outputs["base_prediction"].shape),
             "residual_prediction": tuple(outputs["residual_prediction"].shape),
+            "residual_gate": tuple(outputs["residual_gate"].shape),
             "targets": tuple(targets.shape),
         },
         "dtypes": {
@@ -275,6 +285,7 @@ def run_real_metrla_naive_train_step(batch_size: int = 2) -> Dict[str, object]:
         targets=targets,
         base_prediction=outputs["base_prediction"],
         residual_prediction=outputs["residual_prediction"],
+        residual_gate=outputs.get("residual_gate"),
         aux_info=outputs.get("aux_info"),
     )
     loss.backward()
@@ -291,6 +302,162 @@ def run_real_metrla_naive_train_step(batch_size: int = 2) -> Dict[str, object]:
             "prediction": tuple(outputs["prediction"].shape),
             "base_prediction": tuple(outputs["base_prediction"].shape),
             "residual_prediction": tuple(outputs["residual_prediction"].shape),
+            "targets": tuple(targets.shape),
+        },
+        "loss": float(loss.item()),
+        "shapes": shapes,
+    }
+
+
+def build_metrla_v11_real_step_config(mode: str = "selective") -> DiffTrafficV11Config:
+    """
+    Build a DiffTraffic-v1.1 config that matches the real METR-LA dataset.
+    """
+
+    return DiffTrafficV11Config(
+        input_len=12,
+        output_len=12,
+        num_features=207,
+        input_embedding_dim=24,
+        tod_embedding_dim=24,
+        dow_embedding_dim=24,
+        adaptive_embedding_dim=80,
+        feed_forward_dim=256,
+        num_heads=4,
+        num_layers=1,
+        residual_hidden_size=64,
+        residual_dropout=0.0,
+        condition_hidden_size=64,
+        residual_refiner_mode=mode,
+        loss_weight_pred=1.0,
+        loss_weight_residual=0.5,
+        loss_weight_gate=0.01,
+    )
+
+
+def run_real_metrla_gate_train_step(batch_size: int = 2) -> Dict[str, object]:
+    """
+    Run one real METR-LA training step with the gate-only v1.1 shell.
+    """
+
+    config = build_metrla_v11_real_step_config(mode="gate_only")
+    dataset = BasicTSForecastingDataset(
+        dataset_name="METR-LA",
+        input_len=config.input_len,
+        output_len=config.output_len,
+        mode=BasicTSMode.TRAIN,
+        use_timestamps=True,
+        local=True,
+        data_file_path="datasets/METR-LA",
+        memmap=False,
+    )
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    batch = next(iter(loader))
+
+    model = DiffTrafficV11GateForForecasting(config)
+    model.train()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer.zero_grad()
+
+    inputs = batch["inputs"].float()
+    inputs_timestamps = batch["inputs_timestamps"].float()
+    targets = batch["targets"].float()
+
+    outputs = model(inputs=inputs, inputs_timestamps=inputs_timestamps)
+    shapes = check_prediction_shapes(
+        prediction=outputs["prediction"],
+        base_prediction=outputs["base_prediction"],
+        residual_prediction=outputs["residual_prediction"],
+        targets=targets,
+    )
+    loss = check_loss_call(
+        prediction=outputs["prediction"],
+        targets=targets,
+        base_prediction=outputs["base_prediction"],
+        residual_prediction=outputs["residual_prediction"],
+        residual_gate=outputs.get("residual_gate"),
+        aux_info=outputs.get("aux_info"),
+    )
+    loss.backward()
+    optimizer.step()
+
+    return {
+        "dataset_batch_shapes": {
+            "inputs": tuple(batch["inputs"].shape),
+            "inputs_timestamps": tuple(batch["inputs_timestamps"].shape),
+            "targets": tuple(batch["targets"].shape),
+            "targets_timestamps": tuple(batch["targets_timestamps"].shape),
+        },
+        "model_io_shapes": {
+            "prediction": tuple(outputs["prediction"].shape),
+            "base_prediction": tuple(outputs["base_prediction"].shape),
+            "residual_prediction": tuple(outputs["residual_prediction"].shape),
+            "residual_gate": tuple(outputs["residual_gate"].shape),
+            "targets": tuple(targets.shape),
+        },
+        "loss": float(loss.item()),
+        "shapes": shapes,
+    }
+
+
+def run_real_metrla_v11_train_step(batch_size: int = 2) -> Dict[str, object]:
+    """
+    Run one real METR-LA training step with the selective v1.1 shell.
+    """
+
+    config = build_metrla_v11_real_step_config(mode="selective")
+    dataset = BasicTSForecastingDataset(
+        dataset_name="METR-LA",
+        input_len=config.input_len,
+        output_len=config.output_len,
+        mode=BasicTSMode.TRAIN,
+        use_timestamps=True,
+        local=True,
+        data_file_path="datasets/METR-LA",
+        memmap=False,
+    )
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    batch = next(iter(loader))
+
+    model = DiffTrafficV11ForForecasting(config)
+    model.train()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer.zero_grad()
+
+    inputs = batch["inputs"].float()
+    inputs_timestamps = batch["inputs_timestamps"].float()
+    targets = batch["targets"].float()
+
+    outputs = model(inputs=inputs, inputs_timestamps=inputs_timestamps)
+    shapes = check_prediction_shapes(
+        prediction=outputs["prediction"],
+        base_prediction=outputs["base_prediction"],
+        residual_prediction=outputs["residual_prediction"],
+        targets=targets,
+    )
+    loss = check_loss_call(
+        prediction=outputs["prediction"],
+        targets=targets,
+        base_prediction=outputs["base_prediction"],
+        residual_prediction=outputs["residual_prediction"],
+        residual_gate=outputs.get("residual_gate"),
+        aux_info=outputs.get("aux_info"),
+    )
+    loss.backward()
+    optimizer.step()
+
+    return {
+        "dataset_batch_shapes": {
+            "inputs": tuple(batch["inputs"].shape),
+            "inputs_timestamps": tuple(batch["inputs_timestamps"].shape),
+            "targets": tuple(batch["targets"].shape),
+            "targets_timestamps": tuple(batch["targets_timestamps"].shape),
+        },
+        "model_io_shapes": {
+            "prediction": tuple(outputs["prediction"].shape),
+            "base_prediction": tuple(outputs["base_prediction"].shape),
+            "residual_prediction": tuple(outputs["residual_prediction"].shape),
+            "residual_gate": tuple(outputs["residual_gate"].shape),
             "targets": tuple(targets.shape),
         },
         "loss": float(loss.item()),

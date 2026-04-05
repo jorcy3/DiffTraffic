@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader
 
 from basicts.configs import BasicTSForecastingConfig
 from basicts.runners.builder import Builder
+from basicts.models.STAEformer.utils import load_staeformer_scaler_stats
 from basicts.utils.constants import BasicTSMode
 
 
@@ -47,24 +48,72 @@ def _load_cfg_from_checkpoint(ckpt_path: str) -> BasicTSForecastingConfig:
 
 
 def _prepare_cfg_for_analysis(cfg: BasicTSForecastingConfig, dataset_name: str, data_file_path: str) -> BasicTSForecastingConfig:
+    dataset_params = cfg.dataset_params or {}
+    model_config = getattr(cfg, "model_config", None)
+
+    if getattr(cfg, "input_len", None) is None:
+        cfg.input_len = dataset_params.get("input_len", getattr(model_config, "input_len", None))
+    if getattr(cfg, "output_len", None) is None:
+        cfg.output_len = dataset_params.get("output_len", getattr(model_config, "output_len", None))
+    if getattr(cfg, "use_timestamps", None) is None:
+        cfg.use_timestamps = dataset_params.get("use_timestamps", True)
+
     cfg.gpus = None
     cfg.dataset_name = dataset_name
-    cfg.use_timestamps = True
-    cfg.test_batch_size = min(int(getattr(cfg, "test_batch_size", 64)), 64)
+    cfg.use_timestamps = True if cfg.use_timestamps is None else cfg.use_timestamps
+    resolved_test_batch_size = getattr(cfg, "test_batch_size", None) or getattr(cfg, "batch_size", None) or 64
+    cfg.test_batch_size = min(int(resolved_test_batch_size), 64)
     cfg.dataset_params["dataset_name"] = dataset_name
     cfg.dataset_params["data_file_path"] = data_file_path
     cfg.dataset_params["local"] = True
     cfg.dataset_params["memmap"] = False
     cfg.dataset_params["use_timestamps"] = True
+    cfg.dataset_params["input_len"] = cfg.input_len
+    cfg.dataset_params["output_len"] = cfg.output_len
+
+    if cfg.input_len is None or cfg.output_len is None:
+        raise ValueError(
+            "Failed to resolve input_len/output_len from cfg.json. "
+            f"Resolved input_len={cfg.input_len}, output_len={cfg.output_len}."
+        )
     return cfg
 
 
-def _build_scaler(cfg: BasicTSForecastingConfig, checkpoint_dict: dict):
+def _is_invalid_stat_tensor(value: Any) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, torch.Tensor):
+        return False
+    return value.numel() == 0
+
+
+def _resolve_scaler_stats(
+    cfg: BasicTSForecastingConfig,
+    checkpoint_dict: dict,
+    data_file_path: str,
+) -> dict | None:
+    stats = checkpoint_dict.get("scaler_stats")
+    if isinstance(stats, dict):
+        mean = stats.get("mean")
+        std = stats.get("std")
+        if not _is_invalid_stat_tensor(mean) and not _is_invalid_stat_tensor(std):
+            return stats
+
+    cfg_stats = getattr(cfg, "stats", None)
+    if isinstance(cfg_stats, dict):
+        mean = cfg_stats.get("mean")
+        std = cfg_stats.get("std")
+        if not _is_invalid_stat_tensor(mean) and not _is_invalid_stat_tensor(std):
+            return cfg_stats
+
+    return load_staeformer_scaler_stats(data_file_path)
+
+
+def _build_scaler(cfg: BasicTSForecastingConfig, checkpoint_dict: dict, data_file_path: str):
     if cfg.scaler is None:
         return None
     scaler = Builder._build_scaler(cfg)
-    if (not scaler.stats) and checkpoint_dict.get("scaler_stats") is not None:
-        scaler.stats = checkpoint_dict["scaler_stats"]
+    scaler.stats = _resolve_scaler_stats(cfg, checkpoint_dict, data_file_path)
     return scaler
 
 
@@ -80,7 +129,7 @@ def load_model_bundle(ckpt_path: str, dataset_name: str, data_file_path: str, de
         cfg_path=str(Path(ckpt_path).with_name("cfg.json")),
         cfg=cfg,
         model=model,
-        scaler=_build_scaler(cfg, checkpoint_dict),
+        scaler=_build_scaler(cfg, checkpoint_dict, data_file_path),
     )
 
 

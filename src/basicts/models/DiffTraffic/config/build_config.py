@@ -8,6 +8,7 @@ from basicts.models.STAEformer.utils import load_staeformer_scaler_stats
 
 from ..loss import difftraffic_loss
 from .difftrafficv1_config import DiffTrafficV1Config
+from .difftrafficv11_config import DiffTrafficV11Config
 
 
 def _resolve_num_features(dataset_name: str) -> int:
@@ -65,6 +66,94 @@ def _build_official_difftraffic_config(
             enable_graph_condition=enable_graph_condition,
             residual_hidden_size=residual_hidden_size,
             condition_hidden_size=condition_hidden_size,
+        ),
+        dataset_name=dataset_name,
+        input_len=12,
+        output_len=12,
+        use_timestamps=True,
+        gpus=gpus,
+        taskflow=STAEformerForecastingTaskFlow(),
+        callbacks=[EarlyStopping(preset["early_stop"])],
+        loss=difftraffic_loss,
+        metrics=preset["metrics"],
+        target_metric="MAE",
+        dataset_params={
+            "dataset_name": dataset_name,
+            "input_len": 12,
+            "output_len": 12,
+            "use_timestamps": True,
+            "memmap": False,
+            "local": True,
+            "data_file_path": data_file_path,
+        },
+        null_val=preset["null_val"],
+        norm_each_channel=preset["norm_each_channel"],
+        stats=load_staeformer_scaler_stats(data_file_path),
+        batch_size=resolved_batch_size,
+        num_epochs=resolved_num_epochs,
+        num_steps=num_steps,
+        eval_after_train=True if resolved_num_epochs is not None else False,
+        optimizer_params={
+            "lr": preset["lr"],
+            "weight_decay": preset["weight_decay"],
+        },
+        lr_scheduler=MultiStepLR,
+        lr_scheduler_params={
+            "milestones": preset["milestones"],
+            "gamma": 0.1,
+        },
+        ckpt_save_dir=ckpt_save_dir,
+    )
+
+
+def _build_difftraffic_v11_model_config(
+    dataset_name: str,
+    residual_hidden_size: int = 128,
+    condition_hidden_size: int = 64,
+    residual_refiner_mode: str = "selective",
+) -> DiffTrafficV11Config:
+    return DiffTrafficV11Config(
+        input_len=12,
+        output_len=12,
+        num_features=_resolve_num_features(dataset_name),
+        residual_hidden_size=residual_hidden_size,
+        condition_hidden_size=condition_hidden_size,
+        residual_refiner_mode=residual_refiner_mode,
+        enable_residual_prior=True,
+        loss_weight_pred=1.0,
+        loss_weight_residual=0.5,
+        loss_weight_gate=0.01,
+    )
+
+
+def _build_official_difftraffic_v11_config(
+    *,
+    model,
+    dataset_name: str,
+    data_file_path: str,
+    gpus: str | None = None,
+    batch_size: int | None = None,
+    num_epochs: int | None = None,
+    num_steps: int | None = None,
+    ckpt_save_dir: str | None = None,
+    residual_hidden_size: int = 128,
+    condition_hidden_size: int = 64,
+    residual_refiner_mode: str = "selective",
+) -> BasicTSForecastingConfig:
+    if dataset_name not in OFFICIAL_STAEFORMER_PRESETS:
+        raise ValueError(f"Unsupported dataset_name: {dataset_name}")
+
+    preset = OFFICIAL_STAEFORMER_PRESETS[dataset_name]
+    resolved_batch_size = preset["batch_size"] if batch_size is None else batch_size
+    resolved_num_epochs = preset["max_epochs"] if num_epochs is None and num_steps is None else num_epochs
+
+    return BasicTSForecastingConfig(
+        model=model,
+        model_config=_build_difftraffic_v11_model_config(
+            dataset_name=dataset_name,
+            residual_hidden_size=residual_hidden_size,
+            condition_hidden_size=condition_hidden_size,
+            residual_refiner_mode=residual_refiner_mode,
         ),
         dataset_name=dataset_name,
         input_len=12,
@@ -166,4 +255,68 @@ def build_official_difftraffic_naive_forecasting_config(
         enable_graph_condition=False,
         residual_hidden_size=residual_hidden_size,
         condition_hidden_size=64,
+    )
+
+
+def build_official_difftraffic_v11_gate_forecasting_config(
+    dataset_name: str,
+    data_file_path: str,
+    gpus: str | None = None,
+    batch_size: int | None = None,
+    num_epochs: int | None = None,
+    num_steps: int | None = None,
+    ckpt_save_dir: str | None = None,
+    residual_hidden_size: int = 128,
+    condition_hidden_size: int = 64,
+) -> BasicTSForecastingConfig:
+    """
+    Build an official-semantics config for the residual-gate-only ablation.
+    """
+
+    from ..arch.difftrafficv11_gate_arch import DiffTrafficV11GateForForecasting
+
+    return _build_official_difftraffic_v11_config(
+        model=DiffTrafficV11GateForForecasting,
+        dataset_name=dataset_name,
+        data_file_path=data_file_path,
+        gpus=gpus,
+        batch_size=batch_size,
+        num_epochs=num_epochs,
+        num_steps=num_steps,
+        ckpt_save_dir=ckpt_save_dir,
+        residual_hidden_size=residual_hidden_size,
+        condition_hidden_size=condition_hidden_size,
+        residual_refiner_mode="gate_only",
+    )
+
+
+def build_official_difftraffic_v11_forecasting_config(
+    dataset_name: str,
+    data_file_path: str,
+    gpus: str | None = None,
+    batch_size: int | None = None,
+    num_epochs: int | None = None,
+    num_steps: int | None = None,
+    ckpt_save_dir: str | None = None,
+    residual_hidden_size: int = 128,
+    condition_hidden_size: int = 64,
+) -> BasicTSForecastingConfig:
+    """
+    Build an official-semantics config for DiffTraffic-v1.1 selective refinement.
+    """
+
+    from ..arch.difftrafficv11_arch import DiffTrafficV11ForForecasting
+
+    return _build_official_difftraffic_v11_config(
+        model=DiffTrafficV11ForForecasting,
+        dataset_name=dataset_name,
+        data_file_path=data_file_path,
+        gpus=gpus,
+        batch_size=batch_size,
+        num_epochs=num_epochs,
+        num_steps=num_steps,
+        ckpt_save_dir=ckpt_save_dir,
+        residual_hidden_size=residual_hidden_size,
+        condition_hidden_size=condition_hidden_size,
+        residual_refiner_mode="selective",
     )
