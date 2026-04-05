@@ -5,6 +5,7 @@ from easytorch.device import set_device_type
 from easytorch.launcher.dist_wrap import dist_wrap
 from easytorch.utils import get_logger, set_visible_devices
 
+from basicts.checkpoint_compat import enable_legacy_checkpoint_compat
 from basicts.configs.base_config import BasicTSConfig
 from basicts.runners import BasicTSRunner
 
@@ -27,6 +28,7 @@ class BasicTSLauncher:
             cfg (BasicTSConfig): configuration dictionary.
         """
         # launch the training process
+        enable_legacy_checkpoint_compat()
         logger = get_logger("BasicTS-launcher")
         logger.info("Launching BasicTS training.")
 
@@ -74,6 +76,7 @@ class BasicTSLauncher:
             cfg (BasicTSConfig): configuration dictionary.
         """
 
+        enable_legacy_checkpoint_compat()
         logger = get_logger("BasicTS-launcher")
         logger.info("Launching BasicTS evaluation.")
 
@@ -100,6 +103,7 @@ class BasicTSLauncher:
         runner.eval(ckpt_path)
 
 def training_func(cfg: BasicTSConfig):
+    enable_legacy_checkpoint_compat()
     # init runner
     runner = BasicTSRunner(cfg)
     # init logger (after making ckpt save dir)
