@@ -57,3 +57,32 @@ def stmae_style_loss(
             loss = loss + w_reconstruction * recon_loss
 
     return loss
+
+
+def stmae_pretrain_loss(
+    prediction: torch.Tensor,
+    targets: torch.Tensor,
+    masked_positions: torch.Tensor | None = None,
+    enhancement_valid_mask: torch.Tensor | None = None,
+    aux_info: dict | None = None,
+) -> torch.Tensor:
+    """
+    Masked reconstruction loss for the STMAE-style pretraining stage.
+
+    Shape:
+        prediction: [B, I, N]
+        targets: [B, I, N]
+        masked_positions: [B, I, N] or None
+        enhancement_valid_mask: [B, I, N] or None
+        return: scalar
+    """
+
+    mask = masked_positions.to(torch.bool) if masked_positions is not None else torch.ones_like(prediction, dtype=torch.bool)
+    if enhancement_valid_mask is not None:
+        mask = mask & enhancement_valid_mask.to(torch.bool)
+    if not torch.any(mask):
+        return torch.mean(torch.abs(prediction - targets)) * 0.0
+
+    recon_error = torch.abs(prediction - targets)
+    recon_error = recon_error * mask.to(recon_error.dtype)
+    return recon_error.sum() / mask.sum().clamp_min(1).to(recon_error.dtype)

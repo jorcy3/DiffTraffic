@@ -24,6 +24,10 @@ class STMAEConfig(STAEformerConfig):
     temporal_mask_ratio: float = field(default=0.2, metadata={"help": "Temporal patch masking ratio."})
     temporal_patch_size: int = field(default=3, metadata={"help": "Temporal masking patch size."})
     mask_value: float = field(default=0.0, metadata={"help": "Replacement value for masked inputs."})
+    pretrained_enhancer_ckpt: str | None = field(
+        default=None,
+        metadata={"help": "Optional checkpoint path for loading a pretrained enhancement encoder."},
+    )
 
     loss_weight_prediction: float = field(default=1.0, metadata={"help": "Forecasting loss weight."})
     loss_weight_reconstruction: float = field(default=0.1, metadata={"help": "Masked reconstruction loss weight."})

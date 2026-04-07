@@ -17,7 +17,11 @@ from basicts.models.STMAE import (
     STMAEConfig,
     STMAEForForecasting,
     STMAEForecastingTaskFlow,
+    STMAEPretrainTaskFlow,
+    STMAEPretrainer,
     build_official_stmae_forecasting_config,
+    build_official_stmae_pretrain_config,
+    stmae_pretrain_loss,
     stmae_style_loss,
 )
 from basicts.utils.constants import BasicTSMode
@@ -31,6 +35,14 @@ def test_stmae_minimal_forward():
     outputs = model(inputs, inputs_timestamps)
     assert tuple(outputs["prediction"].shape) == (2, 12, 207)
     assert tuple(outputs["masked_reconstruction"].shape) == (2, 12, 207)
+
+
+def test_stmae_pretrainer_minimal_forward():
+    cfg = STMAEConfig(input_len=12, output_len=12, num_features=207)
+    model = STMAEPretrainer(cfg)
+    outputs = model(torch.randn(2, 12, 207), torch.zeros(2, 12, 2))
+    assert tuple(outputs["prediction"].shape) == (2, 12, 207)
+    assert tuple(outputs["masked_positions"].shape) == (2, 12, 207)
 
 
 def test_stmae_loss_combines_forecast_and_reconstruction():
@@ -122,6 +134,25 @@ def test_stmae_build_config_helper_matches_mainline_semantics():
     assert cfg.loss is stmae_style_loss
 
 
+def test_stmae_pretrain_build_config_helper_matches_mainline_semantics():
+    dataset_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../datasets/METR-LA"))
+    if not os.path.isdir(dataset_path):
+        pytest.skip("METR-LA dataset is not available locally.")
+
+    cfg = build_official_stmae_pretrain_config(
+        dataset_name="METR-LA",
+        data_file_path=dataset_path,
+        gpus=None,
+        batch_size=2,
+        num_epochs=None,
+        num_steps=1,
+    )
+
+    assert isinstance(cfg.taskflow, STMAEPretrainTaskFlow)
+    assert cfg.loss is stmae_pretrain_loss
+    assert cfg.target_metric == "loss"
+
+
 def test_stmae_basicts_metrla_one_step():
     dataset_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../datasets/METR-LA"))
     if not os.path.isdir(dataset_path):
@@ -140,6 +171,30 @@ def test_stmae_basicts_metrla_one_step():
         )
         cfg.metrics = ["MAE"]
         cfg.target_metric = "MAE"
+        cfg.val_interval = 999999
+        cfg.test_interval = 999999
+        cfg.eval_after_train = False
+        BasicTSLauncher.launch_training(cfg)
+    finally:
+        shutil.rmtree(ckpt_dir, ignore_errors=True)
+
+
+def test_stmae_pretrain_basicts_metrla_one_step():
+    dataset_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../datasets/METR-LA"))
+    if not os.path.isdir(dataset_path):
+        pytest.skip("METR-LA dataset is not available locally.")
+
+    ckpt_dir = tempfile.mkdtemp(prefix="stmae_pretrain_metrla_smoke_")
+    try:
+        cfg = build_official_stmae_pretrain_config(
+            dataset_name="METR-LA",
+            data_file_path=dataset_path,
+            gpus=None,
+            batch_size=2,
+            num_epochs=None,
+            num_steps=1,
+            ckpt_save_dir=ckpt_dir,
+        )
         cfg.val_interval = 999999
         cfg.test_interval = 999999
         cfg.eval_after_train = False

@@ -1,25 +1,20 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import torch
 from torch import nn
-
-from basicts.models.STAEformer import STAEformer
 
 from ..config.stmae_config import STMAEConfig
 from .stmae_encoder import STMAEStyleEnhancer
 
 
-class STMAEForForecasting(nn.Module):
+class STMAEPretrainer(nn.Module):
     """
-    STAEformer backbone with STMAE-style masked enhancement.
+    STMAE-style masked pretrainer for representation enhancement.
     """
 
     def __init__(self, config: STMAEConfig) -> None:
         super().__init__()
         self.config = config
-        self.backbone = STAEformer(config)
         self.enhancer = STMAEStyleEnhancer(
             num_nodes=config.num_features,
             input_len=config.input_len,
@@ -41,28 +36,9 @@ class STMAEForForecasting(nn.Module):
             mask_value=config.mask_value,
         )
         self.loss_weights = {
-            "prediction": float(config.loss_weight_prediction),
+            "prediction": 0.0,
             "reconstruction": float(config.loss_weight_reconstruction),
         }
-        self._maybe_load_pretrained_enhancer(config.pretrained_enhancer_ckpt)
-
-    def _maybe_load_pretrained_enhancer(self, ckpt_path: str | None) -> None:
-        if not ckpt_path:
-            return
-        checkpoint_path = Path(ckpt_path)
-        if not checkpoint_path.exists():
-            raise FileNotFoundError(f"Pretrained enhancer checkpoint not found: {ckpt_path}")
-
-        checkpoint_dict = torch.load(str(checkpoint_path), map_location="cpu")
-        model_state_dict = checkpoint_dict.get("model_state_dict", checkpoint_dict)
-        enhancer_state_dict = {
-            key[len("enhancer.") :]: value
-            for key, value in model_state_dict.items()
-            if key.startswith("enhancer.")
-        }
-        if not enhancer_state_dict:
-            raise ValueError(f"No enhancer weights found in checkpoint: {ckpt_path}")
-        self.enhancer.load_state_dict(enhancer_state_dict, strict=True)
 
     def forward(
         self,
@@ -76,27 +52,21 @@ class STMAEForForecasting(nn.Module):
             inputs_timestamps: [B, I, 2] or None
             enhancement_valid_mask: [B, I, N] or None
             return:
-                prediction: [B, O, N]
-                enhanced_inputs: [B, I, N]
-                masked_reconstruction: [B, I, N]
+                prediction: [B, I, N]
                 masked_positions: [B, I, N]
         """
 
-        enhancement_outputs = self.enhancer(
+        outputs = self.enhancer(
             inputs=inputs,
             inputs_timestamps=inputs_timestamps,
             input_valid_mask=enhancement_valid_mask,
         )
-        prediction = self.backbone(
-            inputs=enhancement_outputs["enhanced_inputs"],
-            inputs_timestamps=inputs_timestamps,
-        )
         return {
-            "prediction": prediction,
-            "enhanced_inputs": enhancement_outputs["enhanced_inputs"],
-            "masked_reconstruction": enhancement_outputs["masked_reconstruction"],
-            "masked_positions": enhancement_outputs["masked_positions"],
-            "enhancement_delta": enhancement_outputs["enhancement_delta"],
+            "prediction": outputs["masked_reconstruction"],
+            "masked_reconstruction": outputs["masked_reconstruction"],
+            "masked_positions": outputs["masked_positions"],
+            "enhancement_delta": outputs["enhancement_delta"],
+            "enhanced_inputs": outputs["enhanced_inputs"],
             "aux_info": {
                 "loss_weights": self.loss_weights,
             },
