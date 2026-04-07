@@ -60,6 +60,7 @@ class STMAEPretrainer(nn.Module):
             inputs=inputs,
             inputs_timestamps=inputs_timestamps,
             input_valid_mask=enhancement_valid_mask,
+            force_mask=True,
         )
         return {
             "prediction": outputs["masked_reconstruction"],

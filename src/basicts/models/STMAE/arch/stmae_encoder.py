@@ -203,12 +203,14 @@ class STMAEStyleEnhancer(nn.Module):
         inputs: torch.Tensor,
         inputs_timestamps: torch.Tensor | None = None,
         input_valid_mask: torch.Tensor | None = None,
+        force_mask: bool = False,
     ) -> dict[str, torch.Tensor]:
         """
         Shape:
             inputs: [B, I, N]
             inputs_timestamps: [B, I, 2] or None
             input_valid_mask: [B, I, N] or None
+            force_mask: bool
             return:
                 enhanced_inputs: [B, I, N]
                 masked_reconstruction: [B, I, N]
@@ -218,7 +220,7 @@ class STMAEStyleEnhancer(nn.Module):
 
         masked_positions = (
             self.mask_generator(inputs, valid_mask=input_valid_mask)
-            if self.training
+            if self.training or force_mask
             else torch.zeros_like(inputs, dtype=torch.bool)
         )
         masked_inputs = torch.where(masked_positions, torch.full_like(inputs, self.mask_value), inputs)

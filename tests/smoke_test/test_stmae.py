@@ -45,6 +45,20 @@ def test_stmae_pretrainer_minimal_forward():
     assert tuple(outputs["masked_positions"].shape) == (2, 12, 207)
 
 
+def test_stmae_pretrainer_eval_keeps_masking_for_validation():
+    cfg = STMAEConfig(
+        input_len=12,
+        output_len=12,
+        num_features=207,
+        spatial_mask_ratio=1.0,
+        temporal_mask_ratio=0.0,
+    )
+    model = STMAEPretrainer(cfg)
+    model.eval()
+    outputs = model(torch.randn(2, 12, 207), torch.zeros(2, 12, 2))
+    assert torch.any(outputs["masked_positions"])
+
+
 def test_stmae_loss_combines_forecast_and_reconstruction():
     prediction = torch.tensor([[[1.0]]], dtype=torch.float32)
     targets = torch.tensor([[[12.0]]], dtype=torch.float32)
