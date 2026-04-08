@@ -6,7 +6,11 @@ from torch import nn
 from basicts.models.STAEformer.arch.staeformer_arch import AttentionLayer, STAEformer
 
 from ..config.staeformer_graph_config import STAEformerGraphConfig
-from ..utils import resolve_graph_bucket_matrix
+from ..utils import (
+    resolve_directional_bucket_matrices,
+    resolve_graph_bucket_matrix,
+    resolve_semantic_bucket_matrix,
+)
 
 
 class GraphAttentionLayer(AttentionLayer):
@@ -119,16 +123,21 @@ class GraphSelfAttentionLayer(nn.Module):
 
 class STAEformerGraph(STAEformer):
     """
-    STAEformer with PDFormer-inspired graph-aware spatial attention bias.
+    STAEformer with lightweight traffic priors injected into spatial attention.
 
-    This is a thin migration of the traffic graph prior into STAEformer's
-    spatial attention, not a full re-implementation of PDFormer.
+    This keeps the deterministic STAEformer backbone intact while adding
+    additive physical, directional, and semantic biases over node-to-node
+    attention. It is a thin migration of traffic priors, not a full
+    re-implementation of PDFormer or DDGformer.
     """
 
     def __init__(self, config: STAEformerGraphConfig):
         super().__init__(config)
         self.graph_bias_enabled = bool(config.graph_bias_enabled)
         self.graph_hop_radius = int(config.graph_hop_radius)
+        self.directional_bias_enabled = bool(config.directional_bias_enabled)
+        self.directional_hop_radius = int(config.directional_hop_radius)
+        self.semantic_bias_enabled = bool(config.semantic_bias_enabled)
 
         self.attn_layers_s = nn.ModuleList(
             [
@@ -156,6 +165,39 @@ class STAEformerGraph(STAEformer):
             self.register_buffer("graph_bucket_matrix", torch.empty(0, 0, dtype=torch.long), persistent=False)
             self.graph_bias_table = None
 
+        if self.directional_bias_enabled:
+            forward_bucket_matrix, backward_bucket_matrix = resolve_directional_bucket_matrices(
+                graph_data_file_path=config.graph_data_file_path,
+                num_nodes=self.num_nodes,
+                hop_radius=self.directional_hop_radius,
+            )
+            if forward_bucket_matrix is None or backward_bucket_matrix is None:
+                raise ValueError("directional_bias_enabled=True requires `graph_data_file_path` to be set.")
+            self.register_buffer("forward_bucket_matrix", forward_bucket_matrix, persistent=False)
+            self.register_buffer("backward_bucket_matrix", backward_bucket_matrix, persistent=False)
+            self.forward_bias_table = nn.Parameter(self._build_initial_directional_bias_table(config))
+            self.backward_bias_table = nn.Parameter(self._build_initial_directional_bias_table(config))
+        else:
+            self.register_buffer("forward_bucket_matrix", torch.empty(0, 0, dtype=torch.long), persistent=False)
+            self.register_buffer("backward_bucket_matrix", torch.empty(0, 0, dtype=torch.long), persistent=False)
+            self.forward_bias_table = None
+            self.backward_bias_table = None
+
+        if self.semantic_bias_enabled:
+            semantic_bucket_matrix = resolve_semantic_bucket_matrix(
+                semantic_data_file_path=config.semantic_data_file_path,
+                num_nodes=self.num_nodes,
+                topk=int(config.semantic_topk),
+                use_abs_corr=bool(config.semantic_use_abs_corr),
+            )
+            if semantic_bucket_matrix is None:
+                raise ValueError("semantic_bias_enabled=True requires `semantic_data_file_path` to be set.")
+            self.register_buffer("semantic_bucket_matrix", semantic_bucket_matrix, persistent=False)
+            self.semantic_bias_table = nn.Parameter(self._build_initial_semantic_bias_table(config))
+        else:
+            self.register_buffer("semantic_bucket_matrix", torch.empty(0, 0, dtype=torch.long), persistent=False)
+            self.semantic_bias_table = None
+
     def _build_initial_bias_table(self, config: STAEformerGraphConfig) -> torch.Tensor:
         """
         Initialize hop-bucket biases with stronger preference for closer nodes.
@@ -168,14 +210,53 @@ class STAEformerGraph(STAEformer):
             base_bias[hop] = float(config.graph_bias_init) / hop
         return base_bias.unsqueeze(0).repeat(self.num_heads, 1)
 
-    def _build_spatial_attn_bias(self) -> torch.Tensor | None:
+    def _build_initial_directional_bias_table(self, config: STAEformerGraphConfig) -> torch.Tensor:
         """
-        Build per-head additive attention bias from hop buckets.
+        Initialize directed-hop biases with a conservative distance decay.
         """
 
-        if not self.graph_bias_enabled or self.graph_bias_table is None or self.graph_bucket_matrix.numel() == 0:
-            return None
-        return self.graph_bias_table[:, self.graph_bucket_matrix]
+        num_buckets = self.directional_hop_radius + 2
+        base_bias = torch.zeros((num_buckets,), dtype=torch.float32)
+        for hop in range(1, self.directional_hop_radius + 1):
+            base_bias[hop] = float(config.directional_bias_init) / hop
+        return base_bias.unsqueeze(0).repeat(self.num_heads, 1)
+
+    def _build_initial_semantic_bias_table(self, config: STAEformerGraphConfig) -> torch.Tensor:
+        """
+        Initialize semantic-neighbor biases.
+        """
+
+        base_bias = torch.zeros((3,), dtype=torch.float32)
+        base_bias[1] = float(config.semantic_bias_init)
+        return base_bias.unsqueeze(0).repeat(self.num_heads, 1)
+
+    def _build_spatial_attn_bias(self) -> torch.Tensor | None:
+        """
+        Build per-head additive attention bias from physical and semantic buckets.
+        """
+
+        attn_bias = None
+
+        if self.graph_bias_enabled and self.graph_bias_table is not None and self.graph_bucket_matrix.numel() > 0:
+            attn_bias = self.graph_bias_table[:, self.graph_bucket_matrix]
+
+        if (
+            self.directional_bias_enabled
+            and self.forward_bias_table is not None
+            and self.backward_bias_table is not None
+            and self.forward_bucket_matrix.numel() > 0
+            and self.backward_bucket_matrix.numel() > 0
+        ):
+            forward_bias = self.forward_bias_table[:, self.forward_bucket_matrix]
+            backward_bias = self.backward_bias_table[:, self.backward_bucket_matrix]
+            directional_bias = forward_bias + backward_bias
+            attn_bias = directional_bias if attn_bias is None else attn_bias + directional_bias
+
+        if self.semantic_bias_enabled and self.semantic_bias_table is not None and self.semantic_bucket_matrix.numel() > 0:
+            semantic_bias = self.semantic_bias_table[:, self.semantic_bucket_matrix]
+            attn_bias = semantic_bias if attn_bias is None else attn_bias + semantic_bias
+
+        return attn_bias
 
     def forward(
         self,

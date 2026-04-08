@@ -32,6 +32,8 @@ def build_smoke_config() -> STAEformerGraphConfig:
         num_layers=1,
         dropout=0.0,
         graph_bias_enabled=False,
+        directional_bias_enabled=False,
+        semantic_bias_enabled=False,
     )
 
 
@@ -67,6 +69,10 @@ def run_real_metrla_train_step(batch_size: int = 2) -> Dict[str, object]:
         graph_hop_radius=2,
         graph_bias_init=0.20,
         graph_far_bias=0.0,
+        directional_bias_enabled=True,
+        directional_hop_radius=2,
+        directional_bias_init=0.10,
+        semantic_bias_enabled=False,
     )
     dataset = BasicTSForecastingDataset(
         dataset_name="METR-LA",
@@ -119,6 +125,15 @@ def run_real_metrla_train_step(batch_size: int = 2) -> Dict[str, object]:
     graph_bias_grad = None
     if model.graph_bias_table is not None and model.graph_bias_table.grad is not None:
         graph_bias_grad = float(model.graph_bias_table.grad.abs().mean().item())
+    forward_bias_grad = None
+    if model.forward_bias_table is not None and model.forward_bias_table.grad is not None:
+        forward_bias_grad = float(model.forward_bias_table.grad.abs().mean().item())
+    backward_bias_grad = None
+    if model.backward_bias_table is not None and model.backward_bias_table.grad is not None:
+        backward_bias_grad = float(model.backward_bias_table.grad.abs().mean().item())
+    semantic_bias_grad = None
+    if model.semantic_bias_table is not None and model.semantic_bias_table.grad is not None:
+        semantic_bias_grad = float(model.semantic_bias_table.grad.abs().mean().item())
 
     return {
         "dataset_batch_shapes": {
@@ -132,4 +147,13 @@ def run_real_metrla_train_step(batch_size: int = 2) -> Dict[str, object]:
         "graph_bucket_shape": tuple(model.graph_bucket_matrix.shape),
         "graph_bucket_max": int(model.graph_bucket_matrix.max().item()),
         "graph_bias_grad_mean": graph_bias_grad,
+        "forward_bucket_shape": tuple(model.forward_bucket_matrix.shape),
+        "forward_bucket_max": int(model.forward_bucket_matrix.max().item()),
+        "forward_bias_grad_mean": forward_bias_grad,
+        "backward_bucket_shape": tuple(model.backward_bucket_matrix.shape),
+        "backward_bucket_max": int(model.backward_bucket_matrix.max().item()),
+        "backward_bias_grad_mean": backward_bias_grad,
+        "semantic_bucket_shape": tuple(model.semantic_bucket_matrix.shape),
+        "semantic_bucket_max": int(model.semantic_bucket_matrix.max().item()) if model.semantic_bucket_matrix.numel() > 0 else None,
+        "semantic_bias_grad_mean": semantic_bias_grad,
     }

@@ -21,6 +21,13 @@ def build_official_staeformer_graph_forecasting_config(
     graph_hop_radius: int = 2,
     graph_bias_init: float = 0.20,
     graph_far_bias: float = 0.0,
+    directional_bias_enabled: bool = True,
+    directional_hop_radius: int = 2,
+    directional_bias_init: float = 0.10,
+    semantic_bias_enabled: bool = False,
+    semantic_topk: int = 8,
+    semantic_bias_init: float = 0.10,
+    semantic_use_abs_corr: bool = True,
 ) -> BasicTSForecastingConfig:
     """
     Build an official-style BasicTS config for STAEformerGraph.
@@ -50,6 +57,14 @@ def build_official_staeformer_graph_forecasting_config(
             graph_hop_radius=graph_hop_radius,
             graph_bias_init=graph_bias_init,
             graph_far_bias=graph_far_bias,
+            directional_bias_enabled=directional_bias_enabled,
+            directional_hop_radius=directional_hop_radius,
+            directional_bias_init=directional_bias_init,
+            semantic_bias_enabled=semantic_bias_enabled,
+            semantic_data_file_path=data_file_path,
+            semantic_topk=semantic_topk,
+            semantic_bias_init=semantic_bias_init,
+            semantic_use_abs_corr=semantic_use_abs_corr,
         ),
         dataset_name=dataset_name,
         input_len=12,
